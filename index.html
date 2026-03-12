@@ -159,7 +159,6 @@ td.neg{color:var(--rose) !important;}
 </head>
 <body>
 
-<!-- SIDEBAR -->
 <nav id="sidebar">
   <div class="sidebar-logo">
     <h1>Nigiwai</h1>
@@ -200,10 +199,8 @@ td.neg{color:var(--rose) !important;}
   <div class="sidebar-footer"><span id="last-update">ยังไม่ได้โหลดข้อมูล</span></div>
 </nav>
 
-<!-- MAIN -->
 <div id="main">
 
-  <!-- BRANCH BANNER -->
   <div id="branch-banner">
     <div class="branch-icon-wrap">
       <div class="branch-icon">🍣</div>
@@ -226,7 +223,6 @@ td.neg{color:var(--rose) !important;}
   </div>
 
   <div id="content">
-    <!-- UPLOAD ZONE -->
     <div id="upload-zone">
       <div class="uz-icon">🍱</div>
       <div class="uz-title">Sales Intelligence Dashboard</div>
@@ -240,10 +236,8 @@ td.neg{color:var(--rose) !important;}
       <button class="uz-btn" onclick="document.getElementById('file-input').click()">🍱 เลือกไฟล์ Excel / CSV</button>
     </div>
 
-    <!-- DASHBOARD PAGES -->
     <div id="dashboard">
 
-      <!-- OVERVIEW -->
       <div class="page active" id="page-overview">
         <div class="section">
           <div class="section-header"><div class="section-title">🗒 กรองตามเดือน</div><div class="section-line"></div></div>
@@ -267,11 +261,9 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- DAILY NET SALES -->
       <div class="page" id="page-daily">
         <div class="section">
           <div class="section-header"><div class="section-title">🗒 Daily Net Sales</div><div class="section-line"></div><div class="section-badge">BILL DETAIL</div></div>
-          <!-- View toggle + month dropdown -->
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
             <div class="tab-group">
               <button class="tab-btn active" id="tab-daily" onclick="setDailyView('daily')">รายวัน</button>
@@ -293,7 +285,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- DAY OF WEEK -->
       <div class="page" id="page-dayofweek">
         <div class="section">
           <div class="section-header"><div class="section-title">🎏 Day-of-Week Pattern</div><div class="section-line"></div><div class="section-badge">จากข้อมูลจริง</div></div>
@@ -303,7 +294,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- VISUAL ANALYTICS -->
       <div class="page" id="page-visual">
         <div class="section">
           <div class="section-header"><div class="section-title">🔯 Visual Analytics</div><div class="section-line"></div></div>
@@ -313,7 +303,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- BASKET SEGMENTATION -->
       <div class="page" id="page-basket_seg">
         <div class="section">
           <div class="section-header"><div class="section-title">🍱 Basket Segmentation</div><div class="section-line"></div></div>
@@ -325,7 +314,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- HOURLY HEATMAP -->
       <div class="page" id="page-hourly">
         <div class="section">
           <div class="section-header"><div class="section-title">🕰 Hourly Sales Heatmap</div><div class="section-line"></div><div class="section-badge">BILL DETAIL</div></div>
@@ -335,7 +323,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- MARKET BASKET -->
       <div class="page" id="page-market_basket">
         <div class="section">
           <div class="section-header"><div class="section-title">🎋 วิเคราะห์ตะกร้าสินค้า</div><div class="section-line"></div></div>
@@ -350,7 +337,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- TIME SERIES -->
       <div class="page" id="page-timeseries">
         <div class="section">
           <div class="section-header"><div class="section-title">📯 Time Series Analysis</div><div class="section-line"></div></div>
@@ -360,7 +346,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- BASKET QUALITY -->
       <div class="page" id="page-quality">
         <div class="section">
           <div class="section-header"><div class="section-title">🌸 Basket Quality</div><div class="section-line"></div></div>
@@ -372,7 +357,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- PROMOTION -->
       <div class="page" id="page-promotion">
         <div class="section">
           <div class="section-header"><div class="section-title">🎐 Promotion Usage</div><div class="section-line"></div></div>
@@ -388,7 +372,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- QUANTITY TABLE -->
       <div class="page" id="page-quantity">
         <div class="section">
           <div class="section-header"><div class="section-title">🍶 Sales by Quantity</div><div class="section-line"></div></div>
@@ -415,7 +398,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- ======================== PAYMENT ANALYSIS ======================== -->
       <div class="page" id="page-payment">
         <div class="section">
           <div class="section-header"><div class="section-title">💴 Payment Analysis</div><div class="section-line"></div><div class="section-badge">CSV · 3 เดือน</div></div>
@@ -429,7 +411,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- ======================== TABLE PERFORMANCE ======================== -->
       <div class="page" id="page-table">
         <div class="section">
           <div class="section-header"><div class="section-title">🪷 Table Performance</div><div class="section-line"></div><div class="section-badge">CSV · รายโต๊ะ</div></div>
@@ -443,7 +424,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- ======================== TOP ITEMS RANKING ======================== -->
       <div class="page" id="page-topitems">
         <div class="section">
           <div class="section-header"><div class="section-title">🐟 Top Items Ranking</div><div class="section-line"></div><div class="section-badge">CSV · 21,380 รายการ</div></div>
@@ -465,7 +445,6 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-      <!-- ======================== 3-MONTH TREND ======================== -->
       <div class="page" id="page-trend">
         <div class="section">
           <div class="section-header"><div class="section-title">🎴 3-Month Business Trend</div><div class="section-line"></div><div class="section-badge">ธ.ค. 2025 – ก.พ. 2026</div></div>
@@ -479,11 +458,7 @@ td.neg{color:var(--rose) !important;}
         </div>
       </div>
 
-    </div><!-- /dashboard -->
-  </div><!-- /content -->
-</div><!-- /main -->
-
-<script>
+    </div></div></div><script>
 // =================== STATE ===================
 const DATA = { hourly:null, category:null, package:null, bills:null };
 const charts = {};
@@ -501,7 +476,7 @@ const COLORS = ['#e8a045','#38b2ac','#a78bfa','#f87171','#34d399','#60a5fa','#f5
 const FILE_KEYS = [
   { kws:['ยอดขายตามสินค้ารายชั่วโมง','ยอดขายตามส_นค_ารายช__วโมง','รายชั่วโมง'], key:'hourly',   sId:'s1', label:'ยอดขายตามสินค้ารายชั่วโมง' },
   { kws:['ยอดขายตามสินค้า','ยอดขายตามส_นค_า'],                                    key:'category', sId:'s2', label:'ยอดขายตามสินค้า' },
-  { kws:['รายงานยอดขายแยกตามแพคเกจ','แยกตามแพคเกจ'],                             key:'package',  sId:'s3', label:'รายงานยอดขายแยกตามแพคเกจ' },
+  { kws:['รายงานยอดขายแยกตามแพคเกจ','แยกตามแพคเกจ'],                              key:'package',  sId:'s3', label:'รายงานยอดขายแยกตามแพคเกจ' },
   { kws:['รายละเอียดบิล','รายละเอ_ยดบ_ล','ตามรายละเอียด'],                        key:'bills',    sId:'s4', label:'รายงานยอดขายแยกตามรายละเอียดบิล' },
 ];
 
@@ -637,6 +612,8 @@ function populateMonthDropdowns() {
   });
   const sorted = Object.entries(monthMap).sort((a,b) => a[0].localeCompare(b[0]));
 
+  ovMonth = 'all'; 
+
   // Overview month pills
   const pillsEl = document.getElementById('ov-month-pills');
   pillsEl.innerHTML = `<div class="m-pill active" onclick="setOvMonth('all',this)">ทั้งหมด</div>` +
@@ -665,6 +642,13 @@ function showPage(id, el) {
   const pg = document.getElementById('page-' + id);
   if (pg) pg.classList.add('active');
   el.classList.add('active');
+  
+  setTimeout(() => {
+    Object.values(charts).forEach(c => { 
+      if (c) c.resize(); 
+    });
+  }, 50);
+
   const titles = { overview:'Performance Overview', daily:'Daily Net Sales', dayofweek:'Day-of-Week Analysis',
     visual:'Visual Analytics', basket_seg:'Basket Segmentation', hourly:'Hourly Sales Heatmap',
     market_basket:'Market Basket Analysis', timeseries:'Time Series Analysis',
@@ -759,7 +743,7 @@ function buildOverview() {
 
   const kpis = [
     { label:'ยอดขายสุทธิ',  value:fmtN(totalNet,2)+' บาท',  sub:'Net Sales',    cls:'gold',   icon:'🪙' },
-    { label:'จำนวนบิล',      value:fmtN(uniqueBills),          sub:'Total Bills',  cls:'teal',   icon:'📜' },
+    { label:'จำนวนบิล',      value:fmtN(uniqueBills),         sub:'Total Bills',  cls:'teal',   icon:'📜' },
     { label:'เฉลี่ยต่อบิล', value:fmtN(avgBill,2)+' บาท',    sub:'Avg per Bill', cls:'violet', icon:'🍣' },
     { label:'ส่วนลดรวม',     value:fmtN(totalDisc,2)+' บาท',  sub:'Discount',     cls:'rose',   icon:'🎐' },
     { label:'จำนวน Items',   value:fmtN(totalItems),           sub:'Total Items',  cls:'green',  icon:'🍜' },
@@ -868,7 +852,7 @@ function buildDaily() {
       if (p.length>=3) key = `${p[2]}-${p[1].padStart(2,'0')}`;
     }
     if (!dayMap[key]) dayMap[key]={net:0,gross:0,bills:new Set(),items:0};
-    dayMap[key].net   += num(g(r,'ราคาสุทธิ'));
+    dayMap[key].net    += num(g(r,'ราคาสุทธิ'));
     dayMap[key].gross += num(g(r,'ยอดก่อนลด'));
     dayMap[key].bills.add(String(g(r,'หมายเลขใบเสร็จ / ID')));
     dayMap[key].items += num(g(r,'จำนวน'));
@@ -1214,7 +1198,7 @@ function getBillSummaries() {
         net: 0, gross: 0, disc: 0, qty: 0, itemTypes: new Set()
       };
     }
-    billMap[id].net   += num(g(r,'ราคาสุทธิ'));
+    billMap[id].net    += num(g(r,'ราคาสุทธิ'));
     billMap[id].gross += num(g(r,'ยอดก่อนลด'));
     billMap[id].disc  += num(g(r,'ส่วนลดสินค้า'));
     billMap[id].qty   += num(g(r,'จำนวน'));
