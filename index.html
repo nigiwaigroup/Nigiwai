@@ -489,11 +489,12 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     }
     if (!matched) { alert(`❌ ไม่รู้จักไฟล์: "${file.name}"`); continue; }
     try {
-      const isCSV = file.name.toLowerCase().endsWith('.csv');
-      DATA[matched.key] = isCSV ? await readCSV(file) : await readExcel(file);
+      // ✨ ใช้ฟังก์ชันเดียวที่ "ถึก" ขึ้น อ่านทั้ง Excel และ CSV ตัดปัญหาภาษาไทยเพี้ยน
+      DATA[matched.key] = await readRobustFile(file);
       document.getElementById(matched.sId).className = 'file-status ok';
       document.getElementById(matched.sId).innerHTML = `<span class="dot"></span>${matched.label} ✓`;
     } catch(err) {
+      console.error("Error reading file:", err);
       document.getElementById(matched.sId).className = 'file-status err';
       document.getElementById(matched.sId).innerHTML = `<span class="dot"></span>${matched.label} ❌`;
     }
@@ -509,125 +510,43 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
   }
 });
 
-// เอา 2 ฟังก์ชันนี้ไปวางทับของเดิมในโค้ดได้เลยครับ
-
-function readExcel(file) {
+// ✨ ฟังก์ชันอ่านไฟล์ฉบับสมบูรณ์ (ครอบคลุมทั้งปัญหาภาษาไทยต่างดาว และหาหัวตารางอัตโนมัติ)
+function readRobustFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = reject;
     reader.onload = e => {
       try {
-        const wb = XLSX.read(e.target.result, { type:'binary' });
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
         
-        // 🔎 ระบบค้นหาหัวตารางอัตโนมัติ (หาคำคีย์เวิร์ดที่มักจะเป็นชื่อคอลัมน์)
-        let headerIdx = 1; 
-        if (rows[0] && rows[0].some(h => {
+        let headerIdx = -1;
+        // สแกนหาบรรทัดหัวตาราง (เผื่อระบบ ERP มีการเพิ่ม/ลดบรรทัด Header)
+        for (let i = 0; i < Math.min(rows.length, 5); i++) {
+          if (rows[i] && rows[i].some(h => {
             const str = String(h).trim();
-            return str.includes('วันที่') || str.includes('ชื่อ') || str.includes('รหัส') || 
-                   str.includes('แพคเกจ') || str.includes('ยอด') || str.includes('หมวด') || 
-                   str.includes('ใบเสร็จ');
-        })) {
-            headerIdx = 0; // ถ้าพบบนบรรทัดแรกสุด ให้ใช้บรรทัดแรก
+            return str.includes('วันที่') || str.includes('ชื่อ') || str.includes('รหัส') || str.includes('ยอด') || str.includes('แพคเกจ');
+          })) {
+            headerIdx = i;
+            break;
+          }
         }
+        
+        if (headerIdx === -1) { resolve([]); return; }
         
         const headers = rows[headerIdx];
-        if (!headers) { resolve([]); return; }
-        const data = rows.slice(headerIdx + 1).filter(r => r.some(v => v !== '' && v != null)).map(r => {
+        const finalData = rows.slice(headerIdx + 1).filter(r => r.some(v => v !== '' && v != null)).map(r => {
           const obj = {};
-          headers.forEach((h,i) => { if (h !== '' && h != null) obj[String(h).trim()] = r[i] ?? ''; });
+          headers.forEach((h, i) => { if (h !== '' && h != null) obj[String(h).trim()] = r[i] ?? ''; });
           return obj;
         });
-        resolve(data);
+        resolve(finalData);
       } catch(err) { reject(err); }
     };
-    reader.readAsBinaryString(file);
-  });
-}
-
-function readCSV(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onload = e => {
-      try {
-        const allRows = parseCSVText(e.target.result);
-        
-        // 🔎 ระบบค้นหาหัวตารางอัตโนมัติ (ใช้เกณฑ์เดียวกันกับ Excel)
-        let headerIdx = 1;
-        if (allRows[0] && allRows[0].some(h => {
-            const str = String(h).trim();
-            return str.includes('วันที่') || str.includes('ชื่อ') || str.includes('รหัส') || 
-                   str.includes('แพคเกจ') || str.includes('ยอด') || str.includes('หมวด') || 
-                   str.includes('ใบเสร็จ');
-        })) {
-          headerIdx = 0;
-        }
-        
-        const headers = allRows[headerIdx] || [];
-        const data = allRows.slice(headerIdx + 1)
-          .filter(r => r.some(v => v !== ''))
-          .map(r => {
-            const obj = {};
-            headers.forEach((h, i) => { if (h) obj[h] = r[i] ?? ''; });
-            return obj;
-          });
-        resolve(data);
-      } catch(err) { reject(err); }
-    };
-    reader.readAsText(file, 'utf-8');
-  });
-}
-
-// ── RFC 4180 CSV parser: handles quoted fields containing commas AND newlines ──
-function parseCSVText(text) {
-  const rows = [];
-  let col = '', row = [], inQ = false;
-  // Normalise CRLF → LF, strip leading BOM
-  text = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i], nx = text[i+1];
-    if (inQ) {
-      if (ch === '"' && nx === '"') { col += '"'; i++; }   // escaped quote ""
-      else if (ch === '"') { inQ = false; }                // closing quote
-      else { col += ch; }                                  // char inside quotes
-    } else {
-      if (ch === '"') { inQ = true; }                      // opening quote
-      else if (ch === ',') { row.push(col.trim()); col = ''; }   // field sep
-      else if (ch === '\n') { row.push(col.trim()); rows.push(row); row = []; col = ''; } // row sep
-      else { col += ch; }
-    }
-  }
-  if (col || row.length) { row.push(col.trim()); if (row.some(v=>v)) rows.push(row); }
-  return rows;
-}
-
-function readCSV(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onload = e => {
-      try {
-        const allRows = parseCSVText(e.target.result);
-        // Row 0 = report title/note, Row 1 = column headers, Row 2+ = data
-        // If row[0] looks like a header (has วันที่ or similar), treat it as row 0 = header
-        let headerIdx = 1;
-        if (allRows[0] && allRows[0].some(h => h.includes('วันที่') || h.includes('ชื่อ') || h.includes('รหัส'))) {
-          headerIdx = 0;
-        }
-        const headers = allRows[headerIdx] || [];
-        const data = allRows.slice(headerIdx + 1)
-          .filter(r => r.some(v => v !== ''))
-          .map(r => {
-            const obj = {};
-            headers.forEach((h, i) => { if (h) obj[h] = r[i] ?? ''; });
-            return obj;
-          });
-        resolve(data);
-      } catch(err) { reject(err); }
-    };
-    reader.readAsText(file, 'utf-8');
+    // ใช้ ArrayBuffer ให้ XLSX จัดการเรื่อง Encoding ให้อัตโนมัติ
+    reader.readAsArrayBuffer(file); 
   });
 }
 
@@ -645,17 +564,29 @@ function updateBranch() {
   }
 }
 
+// ✨ Helper function จัดการเรื่องรูปแบบวันที่ (รองรับทั้ง / และ - และ YYYY-MM-DD หรือ DD/MM/YYYY)
+function getDateParts(str) {
+  if (!str) return null;
+  const dStr = String(str).trim().split(' ')[0]; // ตัดเวลาทิ้งถ้ามี
+  const p = dStr.split(/[-/]/);
+  if (p.length < 3) return null;
+  let y, m, d;
+  if (p[0].length === 4) { y = p[0]; m = p[1]; d = p[2]; } // YYYY-MM-DD
+  else { y = p[2]; m = p[1]; d = p[0]; } // DD/MM/YYYY
+  return { y, m: m.padStart(2, '0'), d: d.padStart(2, '0') };
+}
+
 function populateMonthDropdowns() {
   if (!DATA.bills) return;
   const br = billRows('all');
   const monthMap = {};
   br.forEach(r => {
     const d = String(g(r,'วันที่ชำระเงิน'));
-    const parts = d.split('/');
-    if (parts.length >= 3) {
-      const key = `${parts[2]}-${parts[1].padStart(2,'0')}`;
+    const pt = getDateParts(d);
+    if (pt) {
+      const key = `${pt.y}-${pt.m}`;
       const thM = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
-      monthMap[key] = `${thM[parseInt(parts[1])] || parts[1]} ${parts[2]}`;
+      monthMap[key] = `${thM[parseInt(pt.m)] || pt.m} ${pt.y}`;
     }
   });
   const sorted = Object.entries(monthMap).sort((a,b) => a[0].localeCompare(b[0]));
@@ -669,13 +600,15 @@ function populateMonthDropdowns() {
 
   // Daily month dropdown
   const dailySel = document.getElementById('daily-month-sel');
-  dailySel.innerHTML = `<option value="all">ทุกเดือน</option>` +
-    sorted.map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
+  if (dailySel) {
+    dailySel.innerHTML = `<option value="all">ทุกเดือน</option>` + sorted.map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
+  }
 
   // Qty month dropdown
   const qtySel = document.getElementById('qty-month');
-  qtySel.innerHTML = `<option value="">ทุกเดือน</option>` +
-    sorted.map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
+  if (qtySel) {
+    qtySel.innerHTML = `<option value="">ทุกเดือน</option>` + sorted.map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
+  }
 }
 
 function showDashboard() {
@@ -691,6 +624,7 @@ function showPage(id, el) {
   if (pg) pg.classList.add('active');
   el.classList.add('active');
   
+  // ✨ บังคับให้ Chart.js คำนวณขนาดใหม่เมื่อเปลี่ยนหน้า แก้อาการกราฟดับ
   setTimeout(() => {
     Object.values(charts).forEach(c => { 
       if (c) c.resize(); 
@@ -743,9 +677,8 @@ function billRows(monthKey) {
   if (!monthKey || monthKey === 'all' || monthKey === '') return rows;
   return rows.filter(r => {
     const d = String(g(r,'วันที่ชำระเงิน'));
-    const p = d.split('/');
-    if (p.length < 3) return false;
-    return `${p[2]}-${p[1].padStart(2,'0')}` === monthKey;
+    const pt = getDateParts(d);
+    return pt ? `${pt.y}-${pt.m}` === monthKey : false;
   });
 }
 
@@ -835,9 +768,10 @@ function buildMoM() {
   const br = billRows('all');
   const monthMap = {};
   br.forEach(r => {
-    const d = String(g(r,'วันที่ชำระเงิน')), p=d.split('/');
-    if (p.length<3) return;
-    const key = `${p[2]}-${p[1].padStart(2,'0')}`;
+    const d = String(g(r,'วันที่ชำระเงิน'));
+    const pt = getDateParts(d);
+    if (!pt) return;
+    const key = `${pt.y}-${pt.m}`;
     if (!monthMap[key]) monthMap[key]={net:0,bills:new Set()};
     monthMap[key].net += num(g(r,'ราคาสุทธิ'));
     monthMap[key].bills.add(String(g(r,'หมายเลขใบเสร็จ / ID')));
@@ -894,10 +828,12 @@ function buildDaily() {
   br.forEach(r => {
     const d = String(g(r,'วันที่ชำระเงิน')).trim();
     if (!d || d==='Total') return;
-    let key = d;
+    const pt = getDateParts(d);
+    if (!pt) return;
+    
+    let key = `${pt.y}-${pt.m}-${pt.d}`;
     if (dailyView === 'monthly') {
-      const p = d.split('/');
-      if (p.length>=3) key = `${p[2]}-${p[1].padStart(2,'0')}`;
+      key = `${pt.y}-${pt.m}`;
     }
     if (!dayMap[key]) dayMap[key]={net:0,gross:0,bills:new Set(),items:0};
     dayMap[key].net    += num(g(r,'ราคาสุทธิ'));
@@ -906,19 +842,15 @@ function buildDaily() {
     dayMap[key].items += num(g(r,'จำนวน'));
   });
 
-  const keys = Object.keys(dayMap).sort((a,b) => {
-    if (dailyView === 'monthly') return a.localeCompare(b);
-    const pa=a.split('/').map(Number), pb=b.split('/').map(Number);
-    if (pa.length<3||pb.length<3) return 0;
-    return (pa[2]*10000+pa[1]*100+pa[0]) - (pb[2]*10000+pb[1]*100+pb[0]);
-  });
+  const keys = Object.keys(dayMap).sort((a,b) => a.localeCompare(b));
 
   const thM = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
   const labels = keys.map(k => {
+    const p = k.split('-');
     if (dailyView === 'monthly') {
-      const p=k.split('-'); return `${thM[parseInt(p[1])]||p[1]} ${p[0]}`;
+      return `${thM[parseInt(p[1])]||p[1]} ${p[0]}`;
     }
-    const p=k.split('/'); return `${p[0]}/${p[1]}`;
+    return `${p[2]}/${p[1]}`;
   });
 
   const nets  = keys.map(k=>dayMap[k].net);
@@ -978,9 +910,9 @@ function buildDayOfWeek() {
 
   br.forEach(r => {
     const d = String(g(r,'วันที่ชำระเงิน'));
-    const p = d.split('/');
-    if (p.length<3) return;
-    const dt = new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
+    const pt = getDateParts(d);
+    if (!pt) return;
+    const dt = new Date(`${pt.y}-${pt.m}-${pt.d}`);
     const dow = dt.getDay(); // 0=Sun
     if (isNaN(dow)) return;
     dowNet[dow] += num(g(r,'ราคาสุทธิ'));
@@ -1108,7 +1040,7 @@ function buildTimeSeries() {
   const alpha=0.4;const es=[tbh[0]||0];for(let i=1;i<tbh.length;i++)es.push(alpha*tbh[i]+(1-alpha)*es[i-1]);
   mkChart('chartES',{type:'line',data:{labels:hours,datasets:[{label:'ข้อมูลจริง',data:tbh,borderColor:'rgba(248,113,113,.5)',tension:0.1,pointRadius:2},{label:'Exponential Smoothing α=0.4',data:es,borderColor:'#a78bfa',borderWidth:2,tension:0.4,pointRadius:0}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#64748b',maxRotation:90,font:{size:8}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{labels:{color:'#94a3b8',boxWidth:10}}}}});
   const pkg=pkgRows();const sumH=tbh.reduce((s,v)=>s+v,0)||1;
-  mkChart('chartPkgHour',{type:'bar',data:{labels:hours,datasets:pkg.map((r,i)=>({label:String(g(r,'ชื่อแพคเกจ')),data:hours.map(h=>Math.round(num(g(r,'จำนวนบิล'))*(tbh[parseInt(h)]/sumH))),backgroundColor:COLORS[i%COLORS.length]+'99',stack:'pkg'}))},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true,ticks:{color:'#64748b',maxRotation:90,font:{size:8}},grid:{display:false}},y:{stacked:true,ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{labels:{color:'#94a3b8',boxWidth:9,padding:7},position:'bottom'}}}});
+  mkChart('chartPkgHour',{type:'bar',data:{labels:hours,datasets:pkg.map((r,i)=>({label:String(g(r,'ชื่อแพคเกจ')),data:hours.map(h=>Math.round(num(g(r,'จำนวนบิล'))*(tbh[parseInt(h)]/sumH))),backgroundColor:COLORS[i%COLORS.length]+'99',stack:'pkg'}))},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true,ticks:{color:'#64748b',maxRotation:90,font:{size:8}},grid:{display:false}},y:{stacked:true,ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{labels:{color:'#94a3b8',boxWidth:9,padding:7},position:'bottom'}}}}});
 }
 
 // =================== QUALITY ===================
@@ -1160,7 +1092,13 @@ function buildQuantityTable() {
   // Month list
   const thM=['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
   const monthMap={};
-  br.forEach(r=>{const d=String(g(r,'วันที่ชำระเงิน')),p=d.split('/');if(p.length<3)return;const key=`${p[2]}-${p[1].padStart(2,'0')}`;monthMap[key]=`${thM[parseInt(p[1])]||p[1]} ${p[2]}`;});
+  br.forEach(r=>{
+    const d=String(g(r,'วันที่ชำระเงิน'));
+    const pt = getDateParts(d);
+    if (!pt) return;
+    const key=`${pt.y}-${pt.m}`;
+    monthMap[key]=`${thM[parseInt(pt.m)]||pt.m} ${pt.y}`;
+  });
   const sortedMonths=Object.entries(monthMap).sort((a,b)=>a[0].localeCompare(b[0]));
 
   document.getElementById('qty-month').innerHTML = `<option value="">ทุกเดือน</option>`+sortedMonths.map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
@@ -1257,14 +1195,12 @@ function getBillSummaries() {
 }
 
 function parseDate(d) {
-  const p = String(d).split('/');
-  if (p.length < 3) return null;
-  return new Date(`${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`);
+  const pt = getDateParts(d);
+  return pt ? new Date(`${pt.y}-${pt.m}-${pt.d}`) : null;
 }
 function monthKey(d) {
-  const p = String(d).split('/');
-  if (p.length < 3) return '';
-  return `${p[2]}-${p[1].padStart(2,'0')}`;
+  const pt = getDateParts(d);
+  return pt ? `${pt.y}-${pt.m}` : '';
 }
 const thMonthName = k => { const [y,m]=k.split('-'); const nm=['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']; return (nm[parseInt(m)]||m)+' '+y; };
 
@@ -1526,14 +1462,15 @@ function buildTrend() {
   br.forEach(r => {
     const d = String(g(r,'วันที่ชำระเงิน')).trim();
     if (!d || d==='Total') return;
-    if (!dayMap[d]) dayMap[d] = { net:0, m:monthKey(d) };
-    dayMap[d].net += num(g(r,'ราคาสุทธิ'));
+    const pt = getDateParts(d);
+    if (!pt) return;
+    const normD = `${pt.y}-${pt.m}-${pt.d}`;
+    if (!dayMap[normD]) dayMap[normD] = { net:0, m:`${pt.y}-${pt.m}` };
+    dayMap[normD].net += num(g(r,'ราคาสุทธิ'));
   });
-  const sortedDays = Object.entries(dayMap).sort((a,b)=>{
-    const pa=a[0].split('/').map(Number), pb=b[0].split('/').map(Number);
-    return (pa[2]*10000+pa[1]*100+pa[0])-(pb[2]*10000+pb[1]*100+pb[0]);
-  });
-  const dayLabels = sortedDays.map(([d])=>{ const p=d.split('/'); return `${p[0]}/${p[1]}`; });
+  
+  const sortedDays = Object.entries(dayMap).sort((a,b) => a[0].localeCompare(b[0]));
+  const dayLabels = sortedDays.map(([d]) => { const p=d.split('-'); return `${p[2]}/${p[1]}`; });
   const dayNets = sortedDays.map(([,v])=>v.net);
   const dayColors = sortedDays.map(([,v]) => {
     const monthColors = {'2025-12':'rgba(232,160,69,.8)','2026-01':'rgba(56,178,172,.8)','2026-02':'rgba(167,139,250,.8)'};
