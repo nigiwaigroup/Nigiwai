@@ -509,6 +509,8 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
   }
 });
 
+// เอา 2 ฟังก์ชันนี้ไปวางทับของเดิมในโค้ดได้เลยครับ
+
 function readExcel(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -518,9 +520,21 @@ function readExcel(file) {
         const wb = XLSX.read(e.target.result, { type:'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
-        const headers = rows[1];
+        
+        // 🔎 ระบบค้นหาหัวตารางอัตโนมัติ (หาคำคีย์เวิร์ดที่มักจะเป็นชื่อคอลัมน์)
+        let headerIdx = 1; 
+        if (rows[0] && rows[0].some(h => {
+            const str = String(h).trim();
+            return str.includes('วันที่') || str.includes('ชื่อ') || str.includes('รหัส') || 
+                   str.includes('แพคเกจ') || str.includes('ยอด') || str.includes('หมวด') || 
+                   str.includes('ใบเสร็จ');
+        })) {
+            headerIdx = 0; // ถ้าพบบนบรรทัดแรกสุด ให้ใช้บรรทัดแรก
+        }
+        
+        const headers = rows[headerIdx];
         if (!headers) { resolve([]); return; }
-        const data = rows.slice(2).filter(r => r.some(v => v !== '' && v != null)).map(r => {
+        const data = rows.slice(headerIdx + 1).filter(r => r.some(v => v !== '' && v != null)).map(r => {
           const obj = {};
           headers.forEach((h,i) => { if (h !== '' && h != null) obj[String(h).trim()] = r[i] ?? ''; });
           return obj;
@@ -529,6 +543,40 @@ function readExcel(file) {
       } catch(err) { reject(err); }
     };
     reader.readAsBinaryString(file);
+  });
+}
+
+function readCSV(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = e => {
+      try {
+        const allRows = parseCSVText(e.target.result);
+        
+        // 🔎 ระบบค้นหาหัวตารางอัตโนมัติ (ใช้เกณฑ์เดียวกันกับ Excel)
+        let headerIdx = 1;
+        if (allRows[0] && allRows[0].some(h => {
+            const str = String(h).trim();
+            return str.includes('วันที่') || str.includes('ชื่อ') || str.includes('รหัส') || 
+                   str.includes('แพคเกจ') || str.includes('ยอด') || str.includes('หมวด') || 
+                   str.includes('ใบเสร็จ');
+        })) {
+          headerIdx = 0;
+        }
+        
+        const headers = allRows[headerIdx] || [];
+        const data = allRows.slice(headerIdx + 1)
+          .filter(r => r.some(v => v !== ''))
+          .map(r => {
+            const obj = {};
+            headers.forEach((h, i) => { if (h) obj[h] = r[i] ?? ''; });
+            return obj;
+          });
+        resolve(data);
+      } catch(err) { reject(err); }
+    };
+    reader.readAsText(file, 'utf-8');
   });
 }
 
