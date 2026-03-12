@@ -489,12 +489,12 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     }
     if (!matched) { alert(`❌ ไม่รู้จักไฟล์: "${file.name}"`); continue; }
     try {
-      // ✨ ใช้ฟังก์ชันเดียวที่ "ถึก" ขึ้น อ่านทั้ง Excel และ CSV ตัดปัญหาภาษาไทยเพี้ยน
-      DATA[matched.key] = await readRobustFile(file);
+      const isCSV = file.name.toLowerCase().endsWith('.csv');
+      // ใช้ระบบอ่านไฟล์ดั้งเดิม 100% ไม่ดัดแปลงอะไรทั้งสิ้น
+      DATA[matched.key] = isCSV ? await readCSV(file) : await readExcel(file);
       document.getElementById(matched.sId).className = 'file-status ok';
       document.getElementById(matched.sId).innerHTML = `<span class="dot"></span>${matched.label} ✓`;
     } catch(err) {
-      console.error("Error reading file:", err);
       document.getElementById(matched.sId).className = 'file-status err';
       document.getElementById(matched.sId).innerHTML = `<span class="dot"></span>${matched.label} ❌`;
     }
@@ -510,43 +510,76 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
   }
 });
 
-// ✨ ฟังก์ชันอ่านไฟล์ฉบับสมบูรณ์ (ครอบคลุมทั้งปัญหาภาษาไทยต่างดาว และหาหัวตารางอัตโนมัติ)
-function readRobustFile(file) {
+// ฟังก์ชันดั้งเดิมของคุณทั้งหมด (เพิ่มแค่การค้นหาหัวตาราง)
+function readExcel(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = reject;
     reader.onload = e => {
       try {
-        const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: 'array' });
+        const wb = XLSX.read(e.target.result, { type:'binary' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-        
-        let headerIdx = -1;
-        // สแกนหาบรรทัดหัวตาราง (เผื่อระบบ ERP มีการเพิ่ม/ลดบรรทัด Header)
-        for (let i = 0; i < Math.min(rows.length, 5); i++) {
-          if (rows[i] && rows[i].some(h => {
-            const str = String(h).trim();
-            return str.includes('วันที่') || str.includes('ชื่อ') || str.includes('รหัส') || str.includes('ยอด') || str.includes('แพคเกจ');
-          })) {
-            headerIdx = i;
-            break;
-          }
-        }
-        
-        if (headerIdx === -1) { resolve([]); return; }
-        
+        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+        let headerIdx = 1;
+        if (rows[0] && rows[0].some(h => String(h).includes('วันที่') || String(h).includes('ชื่อ') || String(h).includes('รหัส'))) headerIdx = 0;
         const headers = rows[headerIdx];
-        const finalData = rows.slice(headerIdx + 1).filter(r => r.some(v => v !== '' && v != null)).map(r => {
+        if (!headers) { resolve([]); return; }
+        const data = rows.slice(headerIdx + 1).filter(r => r.some(v => v !== '' && v != null)).map(r => {
           const obj = {};
-          headers.forEach((h, i) => { if (h !== '' && h != null) obj[String(h).trim()] = r[i] ?? ''; });
+          headers.forEach((h,i) => { if (h !== '' && h != null) obj[String(h).trim()] = r[i] ?? ''; });
           return obj;
         });
-        resolve(finalData);
+        resolve(data);
       } catch(err) { reject(err); }
     };
-    // ใช้ ArrayBuffer ให้ XLSX จัดการเรื่อง Encoding ให้อัตโนมัติ
-    reader.readAsArrayBuffer(file); 
+    reader.readAsBinaryString(file);
+  });
+}
+
+function parseCSVText(text) {
+  const rows = [];
+  let col = '', row = [], inQ = false;
+  text = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i], nx = text[i+1];
+    if (inQ) {
+      if (ch === '"' && nx === '"') { col += '"'; i++; }
+      else if (ch === '"') { inQ = false; }
+      else { col += ch; }
+    } else {
+      if (ch === '"') { inQ = true; }
+      else if (ch === ',') { row.push(col.trim()); col = ''; }
+      else if (ch === '\n') { row.push(col.trim()); rows.push(row); row = []; col = ''; }
+      else { col += ch; }
+    }
+  }
+  if (col || row.length) { row.push(col.trim()); if (row.some(v=>v)) rows.push(row); }
+  return rows;
+}
+
+function readCSV(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = e => {
+      try {
+        const allRows = parseCSVText(e.target.result);
+        let headerIdx = 1;
+        if (allRows[0] && allRows[0].some(h => h.includes('วันที่') || h.includes('ชื่อ') || h.includes('รหัส'))) {
+          headerIdx = 0;
+        }
+        const headers = allRows[headerIdx] || [];
+        const data = allRows.slice(headerIdx + 1)
+          .filter(r => r.some(v => v !== ''))
+          .map(r => {
+            const obj = {};
+            headers.forEach((h, i) => { if (h) obj[h] = r[i] ?? ''; });
+            return obj;
+          });
+        resolve(data);
+      } catch(err) { reject(err); }
+    };
+    reader.readAsText(file, 'utf-8');
   });
 }
 
@@ -564,15 +597,15 @@ function updateBranch() {
   }
 }
 
-// ✨ Helper function จัดการเรื่องรูปแบบวันที่ (รองรับทั้ง / และ - และ YYYY-MM-DD หรือ DD/MM/YYYY)
-function getDateParts(str) {
+// ✨ [พระเอกของงาน] ฟังก์ชันกลางสำหรับอ่านวันที่ ไม่ว่าไฟล์จะมาเป็น 01/12/2025 หรือ 2025-12-01
+function getStandardDate(str) {
   if (!str) return null;
-  const dStr = String(str).trim().split(' ')[0]; // ตัดเวลาทิ้งถ้ามี
-  const p = dStr.split(/[-/]/);
+  const dStr = String(str).trim().split(' ')[0]; // ตัดเวลาทิ้ง
+  const p = dStr.split(/[-/]/); // หั่นด้วย - หรือ / ก็ได้
   if (p.length < 3) return null;
-  let y, m, d;
-  if (p[0].length === 4) { y = p[0]; m = p[1]; d = p[2]; } // YYYY-MM-DD
-  else { y = p[2]; m = p[1]; d = p[0]; } // DD/MM/YYYY
+  let y = p[0].length === 4 ? p[0] : p[2];
+  let m = p[1];
+  let d = p[0].length === 4 ? p[2] : p[0];
   return { y, m: m.padStart(2, '0'), d: d.padStart(2, '0') };
 }
 
@@ -581,8 +614,7 @@ function populateMonthDropdowns() {
   const br = billRows('all');
   const monthMap = {};
   br.forEach(r => {
-    const d = String(g(r,'วันที่ชำระเงิน'));
-    const pt = getDateParts(d);
+    const pt = getStandardDate(g(r,'วันที่ชำระเงิน'));
     if (pt) {
       const key = `${pt.y}-${pt.m}`;
       const thM = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
@@ -591,7 +623,7 @@ function populateMonthDropdowns() {
   });
   const sorted = Object.entries(monthMap).sort((a,b) => a[0].localeCompare(b[0]));
 
-  ovMonth = 'all'; 
+  ovMonth = 'all'; // ✨ เคลียร์สถานะการเลือกเดือน
 
   // Overview month pills
   const pillsEl = document.getElementById('ov-month-pills');
@@ -600,15 +632,13 @@ function populateMonthDropdowns() {
 
   // Daily month dropdown
   const dailySel = document.getElementById('daily-month-sel');
-  if (dailySel) {
-    dailySel.innerHTML = `<option value="all">ทุกเดือน</option>` + sorted.map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
-  }
+  dailySel.innerHTML = `<option value="all">ทุกเดือน</option>` +
+    sorted.map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
 
   // Qty month dropdown
   const qtySel = document.getElementById('qty-month');
-  if (qtySel) {
-    qtySel.innerHTML = `<option value="">ทุกเดือน</option>` + sorted.map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
-  }
+  qtySel.innerHTML = `<option value="">ทุกเดือน</option>` +
+    sorted.map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
 }
 
 function showDashboard() {
@@ -624,7 +654,7 @@ function showPage(id, el) {
   if (pg) pg.classList.add('active');
   el.classList.add('active');
   
-  // ✨ บังคับให้ Chart.js คำนวณขนาดใหม่เมื่อเปลี่ยนหน้า แก้อาการกราฟดับ
+  // ✨ บังคับกราฟคำนวณขนาดใหม่ กันปัญหากราฟล่องหน
   setTimeout(() => {
     Object.values(charts).forEach(c => { 
       if (c) c.resize(); 
@@ -641,7 +671,6 @@ function showPage(id, el) {
 
 // =================== HELPERS ===================
 const num = v => parseFloat(v) || 0;
-// Format Thai baht — never abbreviate
 function fmtB(n) {
   n = Number(n) || 0;
   return n.toLocaleString('th-TH', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' บาท';
@@ -650,7 +679,6 @@ function fmtN(n, d=0) {
   if (n == null || isNaN(n)) return '—';
   return Number(n).toLocaleString('th-TH', { minimumFractionDigits:d, maximumFractionDigits:d });
 }
-// For chart axis labels (compact)
 function fmtAxis(n) {
   n = Number(n) || 0;
   if (Math.abs(n) >= 1e6) return (n/1e6).toFixed(1) + 'ล.';
@@ -676,9 +704,10 @@ function billRows(monthKey) {
   });
   if (!monthKey || monthKey === 'all' || monthKey === '') return rows;
   return rows.filter(r => {
-    const d = String(g(r,'วันที่ชำระเงิน'));
-    const pt = getDateParts(d);
-    return pt ? `${pt.y}-${pt.m}` === monthKey : false;
+    // ✨ ใช้ฟังก์ชันใหม่ กรองวันที่แม่นยำ 100%
+    const pt = getStandardDate(g(r,'วันที่ชำระเงิน'));
+    if (!pt) return false;
+    return `${pt.y}-${pt.m}` === monthKey;
   });
 }
 
@@ -738,10 +767,8 @@ function buildOverview() {
       <div class="kpi-sub">${k.sub}</div>
     </div>`).join('');
 
-  // Month-over-Month comparison
   buildMoM();
 
-  // Top Package Pie
   const pkgNames = pkg.map(r=>g(r,'ชื่อแพคเกจ'));
   const pkgRevs  = pkg.map(r=>num(g(r,'ยอดก่อนลด')));
   mkChart('chartPkgPie',{type:'doughnut',data:{labels:pkgNames,datasets:[{data:pkgRevs,backgroundColor:COLORS,borderColor:'#0a0e17',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#94a3b8',boxWidth:11,padding:10}}}}});
@@ -750,7 +777,6 @@ function buildOverview() {
     {label:'จำนวนบิล (×1000)',data:pkg.map(r=>num(g(r,'จำนวนบิล'))*1000),backgroundColor:'rgba(56,178,172,.7)',borderRadius:5,yAxisID:'y2'}
   ]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#94a3b8'},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#64748b',callback:v=>fmtAxis(v)},grid:{color:'rgba(255,255,255,.04)'}},y2:{position:'right',ticks:{color:'#38b2ac'},grid:{display:false}}},plugins:{legend:{labels:{color:'#94a3b8'}}}}});
 
-  // Top Package by category (from hourly — หมวดสินค้า contains package number)
   const hr = hourRows();
   const pkgTiers = ['299','499','699','999'];
   const pkgCatData = pkgTiers.map(t => {
@@ -758,7 +784,6 @@ function buildOverview() {
     return { label: 'Package '+t, qty: items.reduce((s,r)=>s+num(g(r,'จำนวนการขาย')),0) };
   }).filter(d=>d.qty>0).sort((a,b)=>b.qty-a.qty);
 
-  // Also add cat-level breakdown
   const catF = catRows().filter(r=>num(g(r,'จำนวนการขาย'))>0).sort((a,b)=>num(g(b,'จำนวนการขาย'))-num(g(a,'จำนวนการขาย'))).slice(0,15);
   mkChart('chartTopPkg',{type:'bar',data:{labels:catF.map(r=>g(r,'หมวดสินค้า')),datasets:[{label:'จำนวนขาย',data:catF.map(r=>num(g(r,'จำนวนการขาย'))),backgroundColor:catF.map((_,i)=>COLORS[i%COLORS.length]+'cc'),borderRadius:4}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#94a3b8',font:{size:9}}}},plugins:{legend:{display:false}}}});
 }
@@ -768,8 +793,7 @@ function buildMoM() {
   const br = billRows('all');
   const monthMap = {};
   br.forEach(r => {
-    const d = String(g(r,'วันที่ชำระเงิน'));
-    const pt = getDateParts(d);
+    const pt = getStandardDate(g(r,'วันที่ชำระเงิน'));
     if (!pt) return;
     const key = `${pt.y}-${pt.m}`;
     if (!monthMap[key]) monthMap[key]={net:0,bills:new Set()};
@@ -828,13 +852,9 @@ function buildDaily() {
   br.forEach(r => {
     const d = String(g(r,'วันที่ชำระเงิน')).trim();
     if (!d || d==='Total') return;
-    const pt = getDateParts(d);
+    const pt = getStandardDate(d);
     if (!pt) return;
-    
-    let key = `${pt.y}-${pt.m}-${pt.d}`;
-    if (dailyView === 'monthly') {
-      key = `${pt.y}-${pt.m}`;
-    }
+    let key = dailyView === 'monthly' ? `${pt.y}-${pt.m}` : `${pt.y}-${pt.m}-${pt.d}`;
     if (!dayMap[key]) dayMap[key]={net:0,gross:0,bills:new Set(),items:0};
     dayMap[key].net    += num(g(r,'ราคาสุทธิ'));
     dayMap[key].gross += num(g(r,'ยอดก่อนลด'));
@@ -847,9 +867,7 @@ function buildDaily() {
   const thM = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
   const labels = keys.map(k => {
     const p = k.split('-');
-    if (dailyView === 'monthly') {
-      return `${thM[parseInt(p[1])]||p[1]} ${p[0]}`;
-    }
+    if (dailyView === 'monthly') return `${thM[parseInt(p[1])]||p[1]} ${p[0]}`;
     return `${p[2]}/${p[1]}`;
   });
 
@@ -870,7 +888,6 @@ function buildDaily() {
 
   mkChart('chartDailyItems',{type:'bar',data:{labels,datasets:[{label:'จำนวน Items',data:items,backgroundColor:'rgba(167,139,250,.85)',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#94a3b8',maxRotation:45,font:{size:9}},grid:{display:false}},y:{ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{display:false}}}});
 
-  // Table
   const totNet=nets.reduce((s,v)=>s+v,0), totBills=bills.reduce((s,v)=>s+v,0), totItems=items.reduce((s,v)=>s+v,0);
   document.getElementById('daily-table').innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px">
     <thead><tr style="background:var(--surface2)">
@@ -904,13 +921,11 @@ function buildDaily() {
 // =================== DAY OF WEEK ===================
 function buildDayOfWeek() {
   const br = billRows(null);
-  // Thai DOW order: จันทร์=1, อังคาร=2, ... อาทิตย์=0
   const dowNames = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสฯ','ศุกร์','เสาร์'];
   const dowNet = [0,0,0,0,0,0,0], dowBills=[new Set(),new Set(),new Set(),new Set(),new Set(),new Set(),new Set()];
 
   br.forEach(r => {
-    const d = String(g(r,'วันที่ชำระเงิน'));
-    const pt = getDateParts(d);
+    const pt = getStandardDate(g(r,'วันที่ชำระเงิน'));
     if (!pt) return;
     const dt = new Date(`${pt.y}-${pt.m}-${pt.d}`);
     const dow = dt.getDay(); // 0=Sun
@@ -919,18 +934,15 @@ function buildDayOfWeek() {
     dowBills[dow].add(String(g(r,'หมายเลขใบเสร็จ / ID')));
   });
 
-  // Reorder: Mon–Sun display order
-  const displayOrder = [1,2,3,4,5,6,0]; // Mon first
+  const displayOrder = [1,2,3,4,5,6,0]; 
   const labels = displayOrder.map(i => dowNames[i]);
   const nets   = displayOrder.map(i => dowNet[i]);
   const billCounts = displayOrder.map(i => dowBills[i].size);
   const avgs   = nets.map((v,i) => billCounts[i]>0 ? v/billCounts[i] : 0);
-
   const bgColors = displayOrder.map(i => i===0||i===6 ? 'rgba(232,160,69,.85)' : 'rgba(56,178,172,.75)');
 
   mkChart('chartDow',{type:'bar',data:{labels,datasets:[{label:'ยอดขายสุทธิ (บาท)',data:nets,backgroundColor:bgColors,borderRadius:6}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#94a3b8'},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#64748b',callback:v=>fmtAxis(v)},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${fmtN(ctx.raw,2)} บาท`}}}}});
 
-  // Revenue % by hour (from bill detail)
   const hourlyNetMap = {};
   br.forEach(r => {
     const tStr = String(g(r,'เวลาที่ชำระเงิน'));
@@ -952,11 +964,8 @@ function buildDayOfWeek() {
 // =================== VISUAL ANALYTICS ===================
 function buildVisual() {
   const pkg = pkgRows(), hr = hourRows();
-
-  // Revenue vs Cost by Package
   const pkgNames = pkg.map(r=>g(r,'ชื่อแพคเกจ'));
   const pkgRevs  = pkg.map(r=>num(g(r,'ยอดก่อนลด')));
-  // Cost proxy from hourly: group by package tier
   const pkgCosts = pkg.map(r => {
     const tier = String(g(r,'ชื่อแพคเกจ')).match(/\d+/)?.[0] || '';
     return hr.filter(x=>String(g(x,'หมวดสินค้า')).endsWith(tier)).reduce((s,x)=>{
@@ -969,7 +978,6 @@ function buildVisual() {
     {label:'ต้นทุนประมาณ',data:pkgCosts,backgroundColor:'rgba(248,113,113,.7)',borderRadius:5}
   ]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#94a3b8'},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#64748b',callback:v=>fmtAxis(v)},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{labels:{color:'#94a3b8'}},tooltip:{callbacks:{label:ctx=>`${fmtN(ctx.raw,2)} บาท`}}}}});
 
-  // Net vs Discount by Package
   const netRevs  = pkg.map(r=>{const k=Object.keys(r).find(k=>k.startsWith('ยอดรวม'));return k?num(r[k]):num(g(r,'ยอดก่อนลด'))-num(g(r,'ส่วนลดสินค้า'))-num(g(r,'ส่วนลดบิล'));});
   const discRevs = pkg.map(r=>num(g(r,'ส่วนลดสินค้า'))+num(g(r,'ส่วนลดบิล')));
   mkChart('chartNetVsDisc',{type:'bar',data:{labels:pkgNames,datasets:[
@@ -977,7 +985,6 @@ function buildVisual() {
     {label:'ส่วนลด',data:discRevs,backgroundColor:'rgba(248,113,113,.7)',borderRadius:5}
   ]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#94a3b8'},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#64748b',callback:v=>fmtAxis(v)},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{labels:{color:'#94a3b8'}},tooltip:{callbacks:{label:ctx=>`${fmtN(ctx.raw,2)} บาท`}}}}});
 
-  // Top items
   const top=hr.filter(r=>num(g(r,'ยอดก่อนลด'))>0).sort((a,b)=>num(g(b,'ยอดก่อนลด'))-num(g(a,'ยอดก่อนลด'))).slice(0,10);
   mkChart('chartTopItems',{type:'bar',data:{labels:top.map(r=>{const n=String(g(r,'ชื่อสินค้า'));return n.length>22?n.substring(0,22)+'…':n;}),datasets:[{label:'ยอดก่อนลด',data:top.map(r=>num(g(r,'ยอดก่อนลด'))),backgroundColor:top.map((_,i)=>COLORS[i%COLORS.length]+'cc'),borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#94a3b8',maxRotation:20,font:{size:9}},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#64748b',callback:v=>fmtAxis(v)},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${fmtN(ctx.raw,2)} บาท`}}}}});
 }
@@ -1025,7 +1032,6 @@ function buildMarketBasket() {
   const scat=cat.filter(r=>num(g(r,'จำนวนการขาย'))>0).map(r=>({x:num(g(r,'จำนวนการขาย')),y:num(g(r,'กำไรเฉลี่ย กำไร / จำนวนการขาย')),label:String(g(r,'หมวดสินค้า'))}));
   mkChart('chartProfit',{type:'scatter',data:{datasets:[{label:'หมวดสินค้า',data:scat,backgroundColor:scat.map(d=>d.y>=0?'rgba(52,211,153,.7)':'rgba(248,113,113,.7)'),pointRadius:7}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{title:{display:true,text:'จำนวนขาย',color:'#64748b'},ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.04)'}},y:{title:{display:true,text:'กำไรเฉลี่ย (บาท)',color:'#64748b'},ticks:{color:'#64748b'},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.raw.label}: จำนวน ${fmtN(ctx.raw.x)}, กำไรเฉลี่ย ${fmtN(ctx.raw.y,2)} บาท`}}}}});
 
-  // Summary table — top 10 categories
   const top10=cat.sort((a,b)=>num(g(b,'จำนวนการขาย'))-num(g(a,'จำนวนการขาย'))).slice(0,10);
   document.getElementById('assoc-rules').innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--surface2)"><th style="padding:10px 14px;text-align:left;color:var(--muted)">หมวดสินค้า</th><th style="padding:10px 14px;text-align:right;color:var(--muted)">จำนวนขาย</th><th style="padding:10px 14px;text-align:right;color:var(--muted)">ยอดก่อนลด</th><th style="padding:10px 14px;text-align:right;color:var(--muted)">กำไรเฉลี่ย</th><th style="padding:10px 14px;text-align:right;color:var(--muted)">สถานะ</th></tr></thead><tbody>${top10.map(r=>{const profit=num(g(r,'กำไรเฉลี่ย กำไร / จำนวนการขาย'));const qty=num(g(r,'จำนวนการขาย'));const status=profit>0&&qty>1000?'🌟 เด่น':profit>0?'🌸 ดี':profit<0?'🔴 ขาดทุน':'🎋 ทั่วไป';return `<tr style="border-top:1px solid var(--border)"><td style="padding:10px 14px;color:var(--text)">${g(r,'หมวดสินค้า')}</td><td style="padding:10px 14px;text-align:right;font-family:'Noto Sans Thai',sans-serif">${fmtN(qty)}</td><td style="padding:10px 14px;text-align:right;font-family:'Noto Sans Thai',sans-serif;color:var(--accent)">${fmtN(num(g(r,'ยอดก่อนลด')),2)} บาท</td><td style="padding:10px 14px;text-align:right;font-family:'Noto Sans Thai',sans-serif;color:${profit>=0?'var(--green)':'var(--rose)'}">${fmtN(profit,2)} บาท</td><td style="padding:10px 14px;text-align:center">${status}</td></tr>`;}).join('')}</tbody></table>`;
 }
@@ -1068,7 +1074,6 @@ function buildPromotion() {
   const dr=pkg.map(r=>num(g(r,'ยอดก่อนลด'))>0?(num(g(r,'ส่วนลดสินค้า'))+num(g(r,'ส่วนลดบิล')))/num(g(r,'ยอดก่อนลด'))*100:0);
   mkChart('chartDiscRate',{type:'line',data:{labels:pkg.map(r=>g(r,'ชื่อแพคเกจ')),datasets:[{label:'Discount Rate%',data:dr,borderColor:'#f87171',backgroundColor:'rgba(248,113,113,.1)',fill:true,tension:0.4,pointRadius:5,pointBackgroundColor:'#f87171'}]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#94a3b8'},grid:{display:false}},y:{ticks:{color:'#64748b',callback:v=>v.toFixed(2)+'%'},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{display:false}}}});
 
-  // Promo summary — compact top 10 with bars
   const top10cat = cat.filter(r=>num(g(r,'จำนวนการขาย'))>0).sort((a,b)=>num(g(b,'ส่วนลดสินค้า'))-num(g(a,'ส่วนลดสินค้า'))).slice(0,10);
   const maxDisc = Math.max(...top10cat.map(r=>num(g(r,'ส่วนลดสินค้า'))),1);
   document.getElementById('promo-summary').innerHTML = top10cat.map((r,i)=>{
@@ -1089,13 +1094,12 @@ function buildQuantityTable() {
   const pkgSet = new Set();
   br.forEach(r=>{const mn=String(g(r,'ชื่อเมนู')).trim();if(mn.startsWith('Buffet')){const m=mn.match(/Buffet\s+\d+/);if(m)pkgSet.add(m[0]);}});
 
-  // Month list
   const thM=['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
   const monthMap={};
   br.forEach(r=>{
     const d=String(g(r,'วันที่ชำระเงิน'));
-    const pt = getDateParts(d);
-    if (!pt) return;
+    const pt=getStandardDate(d);
+    if(!pt)return;
     const key=`${pt.y}-${pt.m}`;
     monthMap[key]=`${thM[parseInt(pt.m)]||pt.m} ${pt.y}`;
   });
@@ -1118,7 +1122,6 @@ function renderQtyTable() {
   const cat    = document.getElementById('qty-cat')?.value    ||'';
   const pkg    = document.getElementById('qty-pkg')?.value    ||'';
 
-  // Package filter: find item names sold in bills of that package tier
   let allowedItems = null;
   if (pkg) {
     const pkgBillIds = new Set();
@@ -1127,7 +1130,6 @@ function renderQtyTable() {
     br.forEach(r=>{ if(pkgBillIds.has(String(g(r,'หมายเลขใบเสร็จ / ID')))){ const mn=String(g(r,'ชื่อเมนู')).trim(); if(!mn.startsWith('Buffet')) allowedItems.add(mn); }});
   }
 
-  // Month filter on hourly file — map month → category sales (rough: use bill detail for month match)
   let monthAllowedCats = null;
   if (month) {
     monthAllowedCats = new Set();
@@ -1168,7 +1170,6 @@ function renderQtyTable() {
 function sortQty(col){if(qtySort.col===col)qtySort.dir*=-1;else{qtySort.col=col;qtySort.dir=-1;}renderQtyTable();}
 
 // =================== HELPERS: CSV bill parsing ===================
-// Parse bills into per-bill objects for CSV-sourced analysis
 function getBillSummaries() {
   const br = billRows(null);
   const billMap = {};
@@ -1195,11 +1196,11 @@ function getBillSummaries() {
 }
 
 function parseDate(d) {
-  const pt = getDateParts(d);
+  const pt = getStandardDate(d);
   return pt ? new Date(`${pt.y}-${pt.m}-${pt.d}`) : null;
 }
 function monthKey(d) {
-  const pt = getDateParts(d);
+  const pt = getStandardDate(d);
   return pt ? `${pt.y}-${pt.m}` : '';
 }
 const thMonthName = k => { const [y,m]=k.split('-'); const nm=['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']; return (nm[parseInt(m)]||m)+' '+y; };
@@ -1209,7 +1210,6 @@ function buildPayment() {
   const br = billRows(null);
   if (!br.length) return;
 
-  // aggregate by payment method
   const payMap = {};
   br.forEach(r => {
     const pay = String(g(r,'ประเภทการชำระเงิน')).trim() || 'ไม่ระบุ';
@@ -1241,7 +1241,6 @@ function buildPayment() {
   mkChart('chartPayPie',{type:'doughnut',data:{labels:payLabels,datasets:[{data:pays.map(x=>x.net),backgroundColor:COLORS,borderColor:'#0a0e17',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#94a3b8',boxWidth:11,padding:10}},tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${fmtN(ctx.raw,2)} บาท (${fmtN(ctx.raw/totalNet*100,1)}%)`}}}}});
   mkChart('chartPayBar',{type:'bar',data:{labels:payLabels,datasets:[{label:'ยอดสุทธิ (บาท)',data:pays.map(x=>x.net),backgroundColor:COLORS.map(c=>c+'cc'),borderRadius:6}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#64748b',callback:v=>fmtAxis(v)},grid:{color:'rgba(255,255,255,.04)'}},y:{ticks:{color:'#94a3b8',font:{size:10}}}},plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${fmtN(ctx.raw,2)} บาท`}}}}});
 
-  // By month stacked
   const months = [...new Set(br.map(r=>monthKey(g(r,'วันที่ชำระเงิน'))).filter(Boolean))].sort();
   const topPays = pays.slice(0,6).map(x=>x.pay);
   const monthPayData = topPays.map((pay,pi) => ({
@@ -1359,7 +1358,6 @@ function buildTopItems() {
 
   const catFilter = document.getElementById('item-cat-filter')?.value || '';
 
-  // aggregate items from bill detail (rows with รหัสเมนู)
   const itemMap = {};
   br.forEach(r => {
     const code = String(g(r,'รหัสเมนู')).trim();
@@ -1375,7 +1373,6 @@ function buildTopItems() {
   itemData = Object.values(itemMap).map(x => ({ ...x, orders: x.orders.size }))
     .sort((a,b) => itemView==='qty' ? b.qty-a.qty : b.orders-a.orders);
 
-  // Populate category filter
   const cats = [...new Set(Object.values(itemMap).map(x=>x.cat).filter(Boolean))].sort();
   const sel = document.getElementById('item-cat-filter');
   if (sel && sel.options.length <= 1) {
@@ -1427,7 +1424,6 @@ function buildTrend() {
   const br = billRows(null);
   if (!br.length) return;
 
-  // Monthly summary
   const months = [...new Set(br.map(r=>monthKey(g(r,'วันที่ชำระเงิน'))).filter(Boolean))].sort();
   const monthlyData = months.map(m => {
     const mRows = br.filter(r=>monthKey(g(r,'วันที่ชำระเงิน'))===m);
@@ -1437,7 +1433,6 @@ function buildTrend() {
     return { m, net, bills, items, avg: bills>0?net/bills:0 };
   });
 
-  // KPIs with MoM delta
   const last = monthlyData[monthlyData.length-1];
   const prev = monthlyData[monthlyData.length-2];
   const netDelta = prev ? (last.net-prev.net)/prev.net*100 : 0;
@@ -1457,12 +1452,11 @@ function buildTrend() {
       <div class="kpi-value">${k.value}</div><div class="kpi-sub">${k.sub}</div>${deltaHtml}</div>`;
   }).join('');
 
-  // Daily trend chart across all months
   const dayMap = {};
   br.forEach(r => {
     const d = String(g(r,'วันที่ชำระเงิน')).trim();
     if (!d || d==='Total') return;
-    const pt = getDateParts(d);
+    const pt = getStandardDate(d);
     if (!pt) return;
     const normD = `${pt.y}-${pt.m}-${pt.d}`;
     if (!dayMap[normD]) dayMap[normD] = { net:0, m:`${pt.y}-${pt.m}` };
@@ -1482,7 +1476,6 @@ function buildTrend() {
     {label:'7-day MA',data:dayNets.map((_,i,a)=>{if(i<6)return null;return a.slice(i-6,i+1).reduce((s,v)=>s+v,0)/7;}),type:'line',borderColor:'#f87171',borderWidth:2,pointRadius:0,fill:false,tension:0.4,order:1,spanGaps:true}
   ]},options:{responsive:true,maintainAspectRatio:false,scales:{x:{ticks:{color:'#94a3b8',maxRotation:60,font:{size:8}},grid:{display:false}},y:{ticks:{color:'#64748b',callback:v=>fmtAxis(v)},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{labels:{color:'#94a3b8',boxWidth:10}},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtN(ctx.raw,2)} บาท`}}}}});
 
-  // Payment trend by month
   const topPays = ['PromptPay','คนละครึ่ง','Cash','VISA','Master Card'];
   mkChart('chartTrendPay',{type:'bar',data:{labels:months.map(thMonthName),datasets:topPays.map((pay,pi)=>({
     label:pay,
@@ -1490,7 +1483,6 @@ function buildTrend() {
     backgroundColor:COLORS[pi]+'aa', stack:'pay', borderRadius:3
   }))},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true,ticks:{color:'#94a3b8'},grid:{display:false}},y:{stacked:true,ticks:{color:'#64748b',callback:v=>fmtAxis(v)},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{labels:{color:'#94a3b8',boxWidth:9,padding:6},position:'bottom'},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtN(ctx.raw,2)} บาท`}}}}});
 
-  // Session (lunch 11-16, dinner 17-20, late 20+) by month
   const sessions = { 'กลางวัน (11-16)': [11,12,13,14,15,16], 'เย็น (17-19)': [17,18,19], 'ค่ำ (20+)': [20,21,22,23] };
   mkChart('chartTrendSession',{type:'bar',data:{labels:months.map(thMonthName),datasets:Object.entries(sessions).map(([label,hrs],si)=>({
     label,
@@ -1504,7 +1496,6 @@ function buildTrend() {
     borderRadius:4, stack:'ses'
   }))},options:{responsive:true,maintainAspectRatio:false,scales:{x:{stacked:true,ticks:{color:'#94a3b8'},grid:{display:false}},y:{stacked:true,ticks:{color:'#64748b',callback:v=>fmtAxis(v)},grid:{color:'rgba(255,255,255,.04)'}}},plugins:{legend:{labels:{color:'#94a3b8',boxWidth:9},position:'bottom'},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtN(ctx.raw,2)} บาท`}}}}});
 
-  // Top items per month
   const trendItemsByMonth = months.map(m => {
     const mRows = br.filter(r=>monthKey(g(r,'วันที่ชำระเงิน'))===m);
     const imap = {};
